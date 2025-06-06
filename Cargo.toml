@@ -1,0 +1,20 @@
+[package]
+name = "ddcbacklight"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4.5.23", features = ["derive"] }
+# Not that the `ddc` version MUST be the same that `ddc-i2c` depends on
+# otherwise the DDC traits will not be available for the structs that ddc-i2c gives out.
+ddc = "0.2.0"
+ddc-i2c = { version = "0.2.2", features = ["i2c-linux"] }
+mccs = "0.1.3"
+# i2c-linux ="0.1"
+# cached = { version = "0.54.0", features = ["disk_store"] }
+# foyer = "0.13
+# i3ipc = "0.10.1"
+swayipc = "3.0.3"
+lazy_static = "1.5"
+# lazycell = "1.3"
+zbus = "5.1.1"
