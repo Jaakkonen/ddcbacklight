@@ -5,7 +5,7 @@ CLI app that controls monitor brightness using DDC/CI protocol.
 use std::path::Path;
 
 use clap::{Command, Arg};
-use ddc_i2c::{from_i2c_device, I2cDeviceDdc};
+use ddc_i2c::from_i2c_device;
 use ddc::Ddc;
 use mccs::Value;
 use lazy_static::lazy_static;
@@ -36,7 +36,7 @@ fn get_i2c_dev_by_output(output: &str) -> String {
     std::process::exit(1);
   }
 
-  // Traverse /sys/class/drm/card*-{output}/ddc/i2c-dev and get the first directory name there.
+  // Find the DRM output directory
   let output_path = Path::new("/sys/class/drm/").read_dir().unwrap().find(|d|
    d.as_ref().unwrap().path().to_str().unwrap().ends_with(output)
   ).map(|d| d.unwrap());
@@ -45,14 +45,50 @@ fn get_i2c_dev_by_output(output: &str) -> String {
     panic!("No such output: {}", output);
   }
 
-  let output_path = output_path.unwrap();
-  // If the directory has a
+  let output_path = output_path.unwrap().path();
 
-  // The i2c name is as a directory entry in `output_path/ddc/i2c-dev`.
-  let path = output_path.path().join("ddc").join("i2c-dev");
-    println!("{}", path.to_str().unwrap());
-    let dev = path.read_dir().unwrap().next().unwrap().unwrap().file_name().to_string_lossy().to_string();
-    format!("/dev/{}", dev)
+  // Try AMD GPU structure first: check for i2c-N directories
+  if let Ok(entries) = output_path.read_dir() {
+    for entry in entries {
+      if let Ok(entry) = entry {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.starts_with("i2c-") {
+          let device_path = format!("/dev/{}", name);
+          eprintln!("AMD GPU detected: Found I2C device {} for output {}", device_path, output);
+          return device_path;
+        }
+      }
+    }
+  }
+
+  // Fallback: try direct ddc symlink
+  let ddc_symlink = output_path.join("ddc");
+  if ddc_symlink.exists() {
+    // AMD GPUs have a direct symlink to the i2c device
+    if let Ok(target) = std::fs::read_link(&ddc_symlink) {
+      // Extract i2c device number from the symlink target (e.g., "../../../i2c-7" -> "i2c-7")
+      if let Some(i2c_name) = target.file_name().and_then(|n| n.to_str()) {
+        let device_path = format!("/dev/{}", i2c_name);
+        eprintln!("AMD GPU detected: Found I2C device {} for output {} (via ddc symlink)", device_path, output);
+        return device_path;
+      }
+    }
+  }
+
+  // Try Intel GPU structure: ddc/i2c-dev/
+  let intel_path = output_path.join("ddc").join("i2c-dev");
+  if intel_path.exists() {
+    if let Ok(mut entries) = intel_path.read_dir() {
+      if let Some(Ok(entry)) = entries.next() {
+        let dev_name = entry.file_name().to_string_lossy().to_string();
+        let device_path = format!("/dev/{}", dev_name);
+        eprintln!("Intel GPU detected: Found I2C device {} for output {}", device_path, output);
+        return device_path;
+      }
+    }
+  }
+
+  panic!("Could not find I2C device for output: {}. Neither AMD nor Intel DDC structure found.", output);
 }
 
 fn set_edp_brightness(backlight_device: &str, value: u16) {
